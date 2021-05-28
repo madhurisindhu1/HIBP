@@ -1,0 +1,280 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "comments": "HaveIBeenPwned_Enrichment_GetAccountBreaches checks if a data has breached from user accounts and updates in the Incident",
+    "author": "Sindhu Talluri, HaveIBeenPwned"
+  },
+  "parameters": {
+
+    "Playbook_Name": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "HaveIBeenPwned_Enrichment_GetAccountBreaches",
+      "metadata": {
+        "description": "Enter the playbook name"
+      }
+    }
+  },
+  "variables": {
+    "azuresentinel_Connection_Name": "[concat('azuresentinel-', parameters('Playbook_Name'))]",
+    "HaveIBeenPwnedConnector_Connection_Name": "[concat('HaveIBeenPwnedConnector-',  parameters('Playbook_Name'))]"
+
+  },
+  "resources": [
+    {
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "actions": {
+            "Add_comment_to_incident_(V3)": {
+              "runAfter": {
+                "Compose_image_to_update_in_the_incident": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ApiConnection",
+              "inputs": {
+                "body": {
+                  "incidentArmId": "@triggerBody()?['object']?['id']",
+                  "message": "<p><strong></strong><strong>@{outputs('Compose_image_to_update_in_the_incident')}</strong><strong>Have i Been Pwned</strong> Enrichment Playbook was triggered the below breached information was collected :<br>\n@{variables('Breaches')}<br>\n</p>"
+                },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/Incidents/Comment"
+              },
+              "description": "This adds comment to the incident"
+            },
+            "Compose_image_to_update_in_the_incident": {
+              "type": "Compose",
+              "inputs": "<img src=\"https://www.bing.com/th?id=OIP.bhGpY9L2aqT2B00nX_gOoAEiEi&w=93&h=100&c=8&rs=1&qlt=90&dpr=1.5&pid=3.1&rm=2\" alt=\"Lamp\" width=\"32\" height=\"32\">",
+              "runAfter": {
+                "For_each_account": [
+                  "Succeeded"
+                ]
+              },
+              "description": "This composes  HaveIBeenPwned logo to be updated in the incident"
+            },
+            "Entities_-_Get_Accounts": {
+              "runAfter": {},
+              "type": "ApiConnection",
+              "inputs": {
+                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/entities/account"
+              },
+              "description": "Get Accounts from Azure Sentinel"
+
+            },
+            "For_each_account": {
+              "type": "Foreach",
+              "foreach": "@body('Entities_-_Get_Accounts')?['Accounts']",
+              "actions": {
+                "Get_all_breaches_for_an_account": {
+                  "runAfter": {},
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['HaveIBeenPwnedConnector']['connectionId']"
+                      }
+                    },
+                    "method": "get",
+                    "path": "/api/v3/breachedaccount/@{encodeURIComponent(items('For_each_account')?['Name'])}"
+                  },
+                  "description": "This gets all the breaches for the account from have i been pwned"
+                },
+                "Switch_to_check_the_status_of_API_response": {
+                  "type": "Switch",
+                  "expression": "@outputs('Get_all_breaches_for_an_account')['statusCode']",
+                  "cases": {
+                    "Case-No_data_found": {
+                      "case": 404,
+                      "actions": {
+                        "Append_to_string_variable_breaches_if_no_breach_information_found": {
+                          "type": "AppendToStringVariable",
+                          "inputs": {
+                            "name": "Breaches",
+                            "value": "There are no breaches found for the account : @{items('For_each_account')?['Name']}"
+                          },
+                          "runAfter": {},
+                          "description": "This appends the variable if no breach information found"
+                        }
+                      }
+                    },
+                    "Case-Success": {
+                      "case": 200,
+                      "actions": {
+                        "Append_to_string_variable_breaches_with_all_the_breach_information": {
+                          "type": "AppendToStringVariable",
+                          "inputs": {
+                            "name": "Breaches",
+                            "value": "For account : @{items('For_each_account')?['Name']}@{body('Create_HTML_table_for_breach_information')}"
+                          },
+                          "runAfter": {
+                            "Create_HTML_table_for_breach_information": [
+                              "Succeeded"
+                            ]
+                          },
+                          "description": "This appends the variable with all the breach information returned from API"
+                        },
+                        "Create_HTML_table_for_breach_information": {
+                          "type": "Table",
+                          "inputs": {
+                            "from": "@body('Get_all_breaches_for_an_account')",
+                            "format": "HTML",
+                            "columns": [
+                              {
+                                "header": "Breached Information-websites",
+                                "value": "@item()?['Name']"
+                              }
+                            ]
+                          },
+                          "runAfter": {},
+                          "description": "This creates HTML table format for all the breach information of that particular account"
+                        }
+                      }
+                    }
+                  },
+                  "default": {
+                    "actions": {
+                      "Append_to_string_variable_if_API_returns_improper_response": {
+                        "type": "AppendToStringVariable",
+                        "inputs": {
+                          "name": "Breaches",
+                          "value": "Improper response from API . \nstatus Code : @{outputs('Get_all_breaches_for_an_account')['statusCode']}"
+                        },
+                        "runAfter": {},
+                        "description": "This appends the variable if API returns improper response"
+                      }
+                    }
+                  },
+                  "runAfter": {
+                    "Get_all_breaches_for_an_account": [
+                      "Succeeded"
+                    ]
+                  },
+                  "description": "This checks on the API response and act accordingly"
+                }
+              },
+              "runAfter": {
+                "Initialize_variable_breaches_to_hold_the_breach_information": [
+                  "Succeeded"
+                ]
+              },
+              "description": "Iterates on each risky account from Azure sentinel",
+              "runtimeConfiguration": {
+                "concurrency": {
+                  "repetitions": 20
+                }
+              }
+            },
+            "Initialize_variable_breaches_to_hold_the_breach_information": {
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "Breaches",
+                    "type": "string"
+                  }
+                ]
+              },
+              "runAfter": {
+                "Entities_-_Get_Accounts": [
+                  "Succeeded"
+                ]
+              },
+              "description": "This holds the breach information"
+            }
+          },
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            }
+          },
+          "triggers": {
+            "When_Azure_Sentinel_incident_creation_rule_was_triggered": {
+              "type": "ApiConnectionWebhook",
+              "inputs": {
+                "body": {
+                  "callback_url": "@{listCallbackUrl()}"
+                },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "path": "/incident-creation"
+              }
+            }
+          },
+          "contentVersion": "1.0.0.0",
+          "outputs": {}
+
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azuresentinel": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azuresentinel_Connection_Name'))]",
+                "connectionName": "[variables('azuresentinel_Connection_Name')]",
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+              },
+              "HaveIBeenPwnedConnector": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('HaveIBeenPwnedConnector_Connection_Name'))]",
+                "connectionName": "[variables('HaveIBeenPwnedConnector_Connection_Name')]",
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/HaveIBeenPwnedConnector')]"
+              }
+            }
+          }
+        }
+      },
+      "name": "[parameters('Playbook_Name')]",
+      "type": "Microsoft.Logic/workflows",
+      "location": "[resourceGroup().location]",
+
+      "apiVersion": "2016-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', variables('azuresentinel_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', variables('HaveIBeenPwnedConnector_Connection_Name'))]"
+      ]
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('azuresentinel_Connection_Name')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "api": {
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+        }
+
+      }
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('HaveIBeenPwnedConnector_Connection_Name')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "api": {
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/HaveIBeenPwnedConnector')]"
+        }
+
+        
+      }
+    }
+  ],
+  "outputs": {}
+}

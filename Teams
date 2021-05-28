@@ -1,0 +1,501 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "comments": "HaveIBeenPwned_ResponseonTeams playbook checks if a data has breached from user accounts and updates in the Incident as well as provide an option to SOC to close incident and send email to account user",
+    "author": "Sindhu Talluri, HaveIBeenPwned"
+  },
+  "parameters": {
+    "Playbook_Name": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "HaveIBeenPwned_ResponseonTeams",
+      "metadata": {
+        "description": "Enter the playbook name"
+      }
+    }
+  },
+  "variables": {
+    "TeamsConnectionName": "[concat('teamsconnector-', parameters('Playbook_Name'))]",
+    "azuresentinel_Connection_Name": "[concat('azuresentinel-', parameters('Playbook_Name'))]",
+    "HaveIBeenPwnedConnector_Connection_Name": "[concat('HaveIBeenPwnedConnector-',  parameters('Playbook_Name'))]",
+    "office365_Connection_Name": "[concat('office365-',  parameters('Playbook_Name'))]"
+  },
+  "resources": [
+    {
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "actions": {
+            "Add_comment_to_incident_(V3)": {
+              "runAfter": {
+                "For_each_account": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ApiConnection",
+              "inputs": {
+                "body": {
+                  "incidentArmId": "@triggerBody()?['object']?['id']",
+                  "message": "<p>@{outputs('Compose_image_to_add_in_the_Incident')}<strong>Have I Been Pwned_ResponseonTeams</strong> Playbook was triggered the below information was collected :<br>\n@{variables('BreachInfo')}<br>\n@{variables('ActionTaken')}</p>"
+                },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/Incidents/Comment"
+              },
+              "description": "This adds comments to the Incident"
+            },
+            "Compose_image_to_add_in_the_Incident": {
+              "type": "Compose",
+              "inputs": "<img src=\"https://www.bing.com/th?id=OIP.bhGpY9L2aqT2B00nX_gOoAEiEi&w=93&h=100&c=8&rs=1&qlt=90&dpr=1.5&pid=3.1&rm=2\" alt=\"Lamp\" width=\"32\" height=\"32\">",
+              "runAfter": {
+                "Post_an_Adaptive_Card_to_a_Teams_channel_and_wait_for_a_response": [
+                  "Succeeded"
+                ]
+              },
+              "description": "This composes the HaveIBeenPwned logo to attach in the incident"
+            },
+            "Entities_-_Get_Accounts": {
+              "runAfter": {},
+              "type": "ApiConnection",
+              "inputs": {
+                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/entities/account"
+              },
+              "description": "Get List of risky user accounts from Azure Sentinel"
+
+            },
+            "For_each_account": {
+              "type": "Foreach",
+              "foreach": "@body('Entities_-_Get_Accounts')?['Accounts']",
+              "actions": {
+                "Get_all_breaches_for_an_account": {
+                  "runAfter": {},
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['HaveIBeenPwnedConnector']['connectionId']"
+                      }
+                    },
+                    "method": "get",
+                    "path": "/api/v3/breachedaccount/@{encodeURIComponent(items('For_each_account')?['Name'])}"
+                  },
+                  "description": "This calls the HaveIBeenPwned API to retrieve the data breaches for an account"
+                },
+                "Switch_to_check_the_response_of_API": {
+                  "type": "Switch",
+                  "expression": "@outputs('Get_all_breaches_for_an_account')['statusCode']",
+                  "cases": {
+                    "Case-No_data_found": {
+                      "case": 404,
+                      "actions": {
+                        "Set_variable_Action_taken_if_no_data_found": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "ActionTaken",
+                            "value": "As there are no breaches found.No Action taken by SOC"
+                          },
+                          "runAfter": {
+                            "Set_variable_breach_information_if_no_data_found": [
+                              "Succeeded"
+                            ]
+                          },
+                          "description": "This sets the action taken variable if no data found"
+                        },
+                        "Set_variable_breach_information_if_no_data_found": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "BreachInfo",
+                            "value": "There are no breaches found"
+                          },
+                          "runAfter": {},
+                          "description": "This sets the breach info variable if no data found"
+                        }
+                      }
+                    },
+                    "Case-Success": {
+                      "case": 200,
+                      "actions": {
+                        "Append_to_string_variable_Breach_Information": {
+                          "type": "AppendToStringVariable",
+                          "inputs": {
+                            "name": "BreachInfo",
+                            "value": "Breach Information for account : @{items('For_each_account')?['Name']} @{body('Create_HTML_table_of_all_the_data_breaches')}"
+                          },
+                          "runAfter": {
+                            "Create_HTML_table_of_all_the_data_breaches": [
+                              "Succeeded"
+                            ]
+                          },
+                          "description": "This appends Breach Information"
+                        },
+                        "Condition_based_on_the_SOC_choice_from_adaptive_card": {
+                          "type": "If",
+                          "expression": {
+                            "and": [
+                              {
+                                "equals": [
+                                  "@body('Post_an_Adaptive_Card_to_a_Teams_channel_and_wait_for_a_response')['submitActionId']",
+                                  "Send Email and Change Incident Configuration"
+                                ]
+                              }
+                            ]
+                          },
+                          "actions": {
+                            "Send_an_email_of_breach_information_to_user": {
+                              "runAfter": {},
+                              "type": "ApiConnection",
+                              "inputs": {
+                                "body": {
+                                  "Body": "<p>Hi,<br>\n<br>\nYour email account was pwned in the below data breaches :<br>\n<br>\n@{body('Create_HTML_table_of_all_the_data_breaches')}<br>\n<br>\nWe recommend to change the password.<br>\n<br>\nThanks<br>\nHave I Been Pwned Team<br>\n</p>",
+                                  "Subject": "Your Email Account was Pwned!!",
+                                  "To": "@items('For_each_account')?['Name']"
+                                },
+                                "host": {
+                                  "connection": {
+                                    "name": "@parameters('$connections')['office365']['connectionId']"
+                                  }
+                                },
+                                "method": "post",
+                                "path": "/v2/Mail"
+                              },
+                              "description": "This sends the user breach information and also recommends to change password"
+                            },
+                            "Set_variable_action_taken": {
+                              "type": "SetVariable",
+                              "inputs": {
+                                "name": "ActionTaken",
+                                "value": "Email sent to user and Incident Configuration updated"
+                              },
+                              "runAfter": {
+                                "Send_an_email_of_breach_information_to_user": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "description": "This sets the action taken variable incase if user selects to send email to user and  change incident configuration"
+                            },
+                            "Update_incident": {
+                              "runAfter": {
+                                "Set_variable_action_taken": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "ApiConnection",
+                              "inputs": {
+                                "body": {
+                                  "classification": {
+                                    "ClassificationAndReason": "@{body('Post_an_Adaptive_Card_to_a_Teams_channel_and_wait_for_a_response')['data']['incidentStatus']}",
+                                    "ClassificationReasonText": "HaveIBeenPwned_ResponsefromTeams playbook ran and closed this incident"
+                                  },
+                                  "incidentArmId": "@triggerBody()?['object']?['id']",
+                                  "severity": "@{body('Post_an_Adaptive_Card_to_a_Teams_channel_and_wait_for_a_response')['data']['incidentSeverity']}",
+                                  "status": "Closed"
+                                },
+                                "host": {
+                                  "connection": {
+                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                  }
+                                },
+                                "method": "put",
+                                "path": "/Incidents"
+                              },
+                              "description": "This updates the Incident based on the adaptive card choices"
+                            }
+                          },
+                          "runAfter": {
+                            "Append_to_string_variable_Breach_Information": [
+                              "Succeeded"
+                            ]
+                          },
+                          "else": {
+                            "actions": {
+                              "Set_variable__action_taken_if_SOC_chooses_to_Ignore": {
+                                "type": "SetVariable",
+                                "inputs": {
+                                  "name": "ActionTaken",
+                                  "value": "SOC Ignored the Incident"
+                                },
+                                "runAfter": {},
+                                "description": "This hold the Action taken  variable in case if SOC chooses to Ignore the Incident"
+                              }
+                            }
+                          },
+                          "description": "This checks on the condition based on the choice selected from adaptive card"
+                        },
+                        "Create_HTML_table_of_all_the_data_breaches": {
+                          "type": "Table",
+                          "inputs": {
+                            "from": "@body('Get_all_breaches_for_an_account')",
+                            "format": "HTML",
+                            "columns": [
+                              {
+                                "header": "Breached Information-websites",
+                                "value": "@item()?['Name']"
+                              }
+                            ]
+                          },
+                          "runAfter": {},
+                          "description": "This creates the HTML table format for the breach information"
+                        }
+                      }
+                    }
+                  },
+                  "default": {
+                    "actions": {
+                      "Set_variable_Action_taken_if_API_response_is_improper": {
+                        "type": "SetVariable",
+                        "inputs": {
+                          "name": "ActionTaken",
+                          "value": "As there is improper response from API.No Action taken by SOC"
+                        },
+                        "runAfter": {
+                          "Set_variable_breach_information_if_no_API_response_is_improper": [
+                            "Succeeded"
+                          ]
+                        },
+                        "description": "This sets the action taken variable if API response is improper"
+                      },
+                      "Set_variable_breach_information_if_no_API_response_is_improper": {
+                        "type": "SetVariable",
+                        "inputs": {
+                          "name": "BreachInfo",
+                          "value": "Improper response from API . \nstatus Code :  @{outputs('Get_all_breaches_for_an_account')['statusCode']}"
+                        },
+                        "runAfter": {},
+                        "description": "This sets the breach info variable if API response is improper"
+                      }
+                    }
+                  },
+                  "runAfter": {
+                    "Get_all_breaches_for_an_account": [
+                      "Succeeded"
+                    ]
+                  }
+                }
+              },
+              "runAfter": {
+                "Compose_image_to_add_in_the_Incident": [
+                  "Succeeded"
+                ]
+              },
+              "description": "This iterates on each account",
+              "runtimeConfiguration": {
+                "concurrency": {
+                  "repetitions": 1
+                }
+              }
+            },
+            "Initialize_variable_Breach_Information": {
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "BreachInfo",
+                    "type": "string"
+                  }
+                ]
+              },
+              "runAfter": {
+                "Entities_-_Get_Accounts": [
+                  "Succeeded"
+                ]
+              },
+              "description": "This holds the breach information"
+            },
+            "Initialize_variable_action_taken": {
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "ActionTaken",
+                    "type": "string"
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_variable_Breach_Information": [
+                  "Succeeded"
+                ]
+              },
+              "description": "This holds the action taken on SOC to comment in the Incident"
+            },
+            "Post_an_Adaptive_Card_to_a_Teams_channel_and_wait_for_a_response": {
+              "runAfter": {
+                "Select_account_names": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ApiConnectionWebhook",
+              "inputs": {
+                "body": {
+                  "body": {
+                    "messageBody": "{\n    \"type\": \"AdaptiveCard\",\n    \"body\":[\n{\n  \"columns\": [\n    {\n      \"items\": [\n  {\n    \"size\": \"large\",\n    \"text\": \"Suspicious Device - Azure Sentinel\",\n    \"type\": \"TextBlock\",\n    \"weight\": \"bolder\",\n    \"wrap\": true\n  },\n  {\n    \"text\": \"Possible comprised accounts detected by the provider \",\n    \"type\": \"TextBlock\",\n    \"wrap\": true\n  },\n  {\n    \"text\": \"  Incident HIBP\",\n    \"type\": \"TextBlock\",\n    \"weight\": \"Bolder\",\n    \"wrap\": true\n  },\n  {\n    \"text\": \" Incident No:  @{triggerBody()?['object']?['properties']?['incidentNumber']} \",\n    \"type\": \"TextBlock\",\n    \"weight\": \"Bolder\",\n    \"wrap\": true\n  },\n  {\n    \"text\": \"Incident description: \",\n    \"type\": \"TextBlock\",\n    \"weight\": \"Bolder\",\n    \"wrap\": true\n  },\n  {\n    \"text\": \"@{triggerBody()?['object']?['properties']?['description']}\",\n    \"type\": \"TextBlock\",\n    \"weight\": \"Bolder\",\n    \"wrap\": true\n  },\n  {\n    \"text\": \"[Click here to view the Incident](@{triggerBody()?['object']?['properties']?['incidentUrl']})\",\n    \"type\": \"TextBlock\",\n    \"wrap\": true\n  },\n  {\n    \"size\": \"Small\",\n    \"type\": \"Image\",\n    \"url\": \"https://www.bing.com/th?id=OIP.bhGpY9L2aqT2B00nX_gOoAEiEi&w=93&h=100&c=8&rs=1&qlt=90&dpr=1.5&pid=3.1&rm=2\"\n  },\n  {\n    \"text\": \"Accounts to be checked in Have I been Pwned \",\n    \"type\": \"TextBlock\",\n    \"weight\": \"Bolder\"\n  }\n],\n      \"type\": \"Column\"\n    }\n  ],\n  \"type\": \"ColumnSet\"\n},\n{\n  \"columns\": [\n    {\n      \"items\": @{body('Select_account_names')},\n      \"type\": \"Column\",\n  \"wrap\": true\n    }\n  ],\n  \"type\": \"ColumnSet\"\n},\n        {\n            \"type\": \"ColumnSet\",\n            \"columns\": [\n                {\n                    \"type\": \"Column\",\n                    \"items\": [\n                        {\n                            \"type\": \"TextBlock\",\n                            \"size\": \"Medium\",\n                            \"weight\": \"Bolder\",\n                            \"text\": \"Incident configuration:\",\n                            \"wrap\": true\n                        }\n                    ],\n                    \"width\": \"auto\"\n                }\n            ]\n        },\n        {\n            \"type\": \"ColumnSet\",\n            \"columns\": [\n                {\n                    \"type\": \"Column\",\n                    \"items\": [\n                        {\n                            \"type\": \"Image\",\n                            \"style\": \"Person\",\n                            \"url\": \"https://connectoricons-prod.azureedge.net/releases/v1.0.1391/1.0.1391.2130/azuresentinel/icon.png\",\n                            \"size\": \"Small\"\n                        }\n                    ],\n                    \"width\": \"auto\"\n                }\n            ]\n        },\n        {\n            \"type\": \"TextBlock\",\n            \"text\": \"Close Azure Sentinal incident?\"\n        },\n        {\n            \"choices\": [\n                {\n                    \"isSelected\": true,\n                    \"title\": \"False Positive - Inaccurate Data\",\n                    \"value\": \"False Positive - Inaccurate Data\"\n                },\n                {\n                    \"isSelected\": true,\n                    \"title\": \"False Positive - Incorrect Alert Logic\",\n                    \"value\": \"False Positive - Incorrect Alert Logic\"\n                },\n                {\n                    \"title\": \"True Positive - Suspicious Activity\",\n                    \"value\": \"True Positive - Suspicious Activity\"\n                },\n                {\n                    \"title\": \"Benign Positive - Suspicious But Expected\",\n                    \"value\": \"Benign Positive - Suspicious But Expected\"\n                },\n                {\n                    \"title\": \"Undetermined\",\n                    \"value\": \"Undetermined\"\n                }\n            ],\n            \"id\": \"incidentStatus\",\n            \"style\": \"compact\",\n            \"type\": \"Input.ChoiceSet\",\n            \"value\": \"Benign Positive - Suspicious But Expected\"\n        },\n        {\n            \"type\": \"TextBlock\",\n            \"text\": \"Change Azure Sentinel Incident Severity?\"\n        },\n        {\n            \"choices\": [\n                {\n                  \n                    \"title\": \"High\",\n                    \"value\": \"High\"\n                },\n                {\n                    \"title\": \"Medium\",\n                    \"value\": \"Medium\"\n                },\n                {\n                    \"title\": \"Low\",\n                    \"value\": \"Low\"\n                },\n                {\n                    \"title\": \"Don't change\",\n                    \"value\": \"same\"\n                }\n            ],\n            \"id\": \"incidentSeverity\",\n            \"style\": \"compact\",\n            \"type\": \"Input.ChoiceSet\",\n            \"value\": \"@{triggerBody()?['object']?['properties']?['severity']}\"\n        }\n],\n\t\"actions\": [\n{\n  \"title\": \"Send Email and Change Incident Configuration\",\n  \"type\": \"Action.Submit\"\n},\n{\n  \"title\": \"Ignore\",\n  \"type\": \"Action.Submit\"\n}\n],\n    \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\n    \"version\": \"1.2\"\n}",
+                    "recipient": {
+                      "channelId": "19:7abc1180c1d84a3fba83770e34231132@thread.tacv2"
+                    },
+                    "shouldUpdateCard": true
+                  },
+                  "notificationUrl": "@{listCallbackUrl()}"
+                },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['teams']['connectionId']"
+                  }
+                },
+                "path": "/flowbot/actions/flowcontinuation/recipienttypes/channel/$subscriptions",
+                "queries": {
+                  "groupId": "18de1100-ab2e-4505-be42-8263b915b221"
+                }
+              },
+              "description": "This posts the adaptive card to SOC channel"
+            },
+            "Select_account_names": {
+              "type": "Select",
+              "inputs": {
+                "from": "@body('Entities_-_Get_Accounts')?['Accounts']",
+                "select": {
+                  "text": "@item()?['Name']",
+                  "type": "TextBlock"
+                }
+              },
+              "runAfter": {
+                "Initialize_variable_action_taken": [
+                  "Succeeded"
+                ]
+              },
+              "description": "This selects the account names to be displayed in the adaptive card"
+            }
+          },
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            }
+          },
+          "triggers": {
+            "When_Azure_Sentinel_incident_creation_rule_was_triggered": {
+              "type": "ApiConnectionWebhook",
+              "inputs": {
+                "body": {
+                  "callback_url": "@{listCallbackUrl()}"
+                },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "path": "/incident-creation"
+              }
+            }
+          },
+          "contentVersion": "1.0.0.0",
+          "outputs": {}
+
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azuresentinel": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azuresentinel_Connection_Name'))]",
+                "connectionName": "[variables('azuresentinel_Connection_Name')]",
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+              },
+              "HaveIBeenPwnedConnector": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('HaveIBeenPwnedConnector_Connection_Name'))]",
+                "connectionName": "[variables('HaveIBeenPwnedConnector_Connection_Name')]",
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/HaveIBeenPwnedConnector')]"
+              },
+              "office365": {
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/office365')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('office365_Connection_Name'))]",
+                "connectionName": "[variables('office365_Connection_Name')]"
+              },
+              "teams": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('TeamsConnectionName'))]",
+                "connectionName": "[variables('TeamsConnectionName')]",
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/teams')]"
+              }
+            }
+          }
+        }
+
+      },
+      "name": "[parameters('Playbook_Name')]",
+      "type": "Microsoft.Logic/workflows",
+      "location": "[resourceGroup().location]",
+
+      "apiVersion": "2016-06-01",
+      "dependsOn": [
+
+        "[resourceId('Microsoft.Web/connections', variables('azuresentinel_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', variables('HaveIBeenPwnedConnector_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', variables('office365_Connection_Name'))]",
+        "[resourceId('Microsoft.Web/connections', variables('TeamsConnectionName'))]"
+      ]
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('office365_Connection_Name')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "api": {
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/office365')]"
+
+        }
+      }
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('HaveIBeenPwnedConnector_Connection_Name')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "api": {
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/HaveIBeenPwnedConnector')]"
+        }
+
+
+      }
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('TeamsConnectionName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "api": {
+
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/teams')]"
+        }
+
+      }
+    },
+    {
+      "type": "MICROSOFT.WEB/CONNECTIONS",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('azuresentinel_Connection_Name')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "api": {
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+        }
+
+
+      }
+    }
+  ],
+  "outputs": {}
+}

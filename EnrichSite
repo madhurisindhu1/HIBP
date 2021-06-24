@@ -7,7 +7,7 @@
   },
   "parameters": {
 
-    "Playbook_Name": {
+    "Playbook Name": {
       "type": "string",
       "minLength": 1,
       "defaultValue": "HaveIBeenPwned_Enrichment_GetSiteBreaches",
@@ -17,8 +17,8 @@
     }
   },
   "variables": {
-    "azuresentinel_Connection_Name": "[concat('azuresentinel-', parameters('Playbook_Name'))]",
-    "HaveIBeenPwnedConnector_Connection_Name": "[concat('HaveIBeenPwnedConnector-',  parameters('Playbook_Name'))]"
+    "azuresentinel_Connection_Name": "[concat('azuresentinel-', parameters('Playbook Name'))]",
+    "HaveIBeenPwnedConnector_Connection_Name": "[concat('HaveIBeenPwnedConnector-',  parameters('Playbook Name'))]"
   },
   "resources": [
     {
@@ -27,37 +27,299 @@
         "definition": {
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
           "actions": {
-            "Add_comment_to_incident_(V3)": {
-              "type": "ApiConnection",
-              "inputs": {
-                "host": {
-                  "connection": {
-                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+            "Condition_to_check_if_we_are_getting_URL_information_from_sentinel": {
+              "type": "If",
+              "expression": {
+                "and": [
+                  {
+                    "greater": [
+                      "@length(body('Entities_-_Get_URLs')?['URLs']?[0]?['Url'])",
+                      0
+                    ]
                   }
+                ]
+              },
+              "actions": {
+                "Condition_to_check_if_needs_to_be_terminated": {
+                  "type": "If",
+                  "expression": {
+                    "and": [
+                      {
+                        "equals": [
+                          "@variables('Terminate')",
+                          "Success"
+                        ]
+                      }
+                    ]
+                  },
+                  "actions": {
+                    "Add_comment_to_incident_(V3)": {
+                      "type": "ApiConnection",
+                      "inputs": {
+                        "host": {
+                          "connection": {
+                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                          }
+                        },
+                        "method": "post",
+                        "body": {
+                          "incidentArmId": "@triggerBody()?['object']?['id']",
+                          "message": "<p><strong></strong><strong>@{outputs('Compose_image_to_update_in_the_incident')}</strong><strong> HaveIBeenPwned_BreachedsitesEnrichment </strong>playbook<strong> </strong>ran and fetched the below information for breach incidents:<br>\n@{variables('Breaches')}</p>"
+                        },
+                        "path": "/Incidents/Comment"
+                      },
+                      "runAfter": {
+                        "Compose_image_to_update_in_the_incident": [
+                          "Succeeded"
+                        ]
+                      },
+                      "description": "This adds comment to the Incident"
+                    },
+                    "Compose_image_to_update_in_the_incident": {
+                      "type": "Compose",
+                      "inputs": "<img src=\"https://www.bing.com/th?id=OIP.bhGpY9L2aqT2B00nX_gOoAEiEi&w=93&h=100&c=8&rs=1&qlt=90&dpr=1.5&pid=3.1&rm=2\" alt=\"Lamp\" width=\"32\" height=\"32\">",
+                      "runAfter": {},
+                      "description": "This composes HaveIBeenPwned image to be added to the Incident"
+                    }
+                  },
+                  "runAfter": {
+                    "For_each_URL": [
+                      "Succeeded"
+                    ]
+                  },
+                  "else": {
+                    "actions": {
+                      "Terminate": {
+                        "type": "Terminate",
+                        "inputs": {
+                          "runStatus": "Failed"
+                        },
+                        "runAfter": {}
+                      }
+                    }
+                  },
+                  "description": "This checks the value of terminate variable"
                 },
-                "method": "post",
-                "body": {
-                  "incidentArmId": "@triggerBody()?['object']?['id']",
-                  "message": "<p><strong></strong><strong>@{outputs('Compose_image_to_update_in_the_incident')}</strong><strong>Have i Been Pwned_BreachedsitesEnrichment </strong>Playbook was triggered and below breached information was collected :<br>\n@{variables('Breaches')}</p>"
-                },
-                "path": "/Incidents/Comment"
+                "For_each_URL": {
+                  "type": "Foreach",
+                  "foreach": "@body('Entities_-_Get_URLs')?['URLs']",
+                  "actions": {
+                    "Get_breached_site_information": {
+                      "type": "ApiConnection",
+                      "inputs": {
+                        "host": {
+                          "connection": {
+                            "name": "@parameters('$connections')['HaveIBeenPwnedConnector']['connectionId']"
+                          }
+                        },
+                        "method": "get",
+                        "path": "/api/v3/breaches",
+                        "queries": {
+                          "domain": "@items('For_each_URL')?['Url']"
+                        }
+                      },
+                      "runAfter": {},
+                      "description": "Get breached information for particular site from Have i been pwned"
+                    },
+                    "Switch_to_check_the_status_of_API_response_from_HaveIBeenPwned": {
+                      "type": "Switch",
+                      "expression": "@outputs('Get_breached_site_information')['statusCode']",
+                      "cases": {
+                        "Case-No_data_found": {
+                          "case": 404,
+                          "actions": {
+                            "Append_to_string_variable_breaches_if_no_breach_information_found": {
+                              "type": "AppendToStringVariable",
+                              "inputs": {
+                                "name": "Breaches",
+                                "value": "There are no breaches found for the site : @{items('For_each_URL')?['Url']}"
+                              },
+                              "runAfter": {},
+                              "description": "This appends no data if no information for sites are found"
+                            },
+                            "Set_variable_terminate_in_case_if_accounts_are_breached": {
+                              "type": "SetVariable",
+                              "inputs": {
+                                "name": "Terminate",
+                                "value": "Success"
+                              },
+                              "runAfter": {
+                                "Append_to_string_variable_breaches_if_no_breach_information_found": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "description": "This sets the terminate variable to success if accounts are breached"
+                            }
+                          }
+                        },
+                        "Case-Success": {
+                          "case": 200,
+                          "actions": {
+                            "Condition_to_check_if_API_response_is_null_or_not": {
+                              "type": "If",
+                              "expression": {
+                                "and": [
+                                  {
+                                    "greater": [
+                                      "@length(body('Get_breached_site_information'))",
+                                      0
+                                    ]
+                                  }
+                                ]
+                              },
+                              "actions": {
+                                "Append_to_string_variable_breaches_with_all_the_breach_information": {
+                                  "type": "AppendToStringVariable",
+                                  "inputs": {
+                                    "name": "Breaches",
+                                    "value": "@body('Create_HTML_table_for_site_breach_information')"
+                                  },
+                                  "runAfter": {
+                                    "Create_HTML_table_for_site_breach_information": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "description": "This appends breach information to the variable breaches"
+                                },
+                                "Create_HTML_table_for_site_breach_information": {
+                                  "type": "Table",
+                                  "inputs": {
+                                    "from": "@body('Get_breached_site_information')",
+                                    "format": "HTML",
+                                    "columns": [
+                                      {
+                                        "header": "Name",
+                                        "value": "@item()?['Name']"
+                                      },
+                                      {
+                                        "header": "Domain",
+                                        "value": "@item()?['Domain']"
+                                      },
+                                      {
+                                        "header": "Initial Breach Date",
+                                        "value": "@item()?['BreachDate']"
+                                      },
+                                      {
+                                        "header": "Recent Breach Date",
+                                        "value": "@item()?['ModifiedDate']"
+                                      },
+                                      {
+                                        "header": "Pwned Count",
+                                        "value": "@item()?['PwnCount']"
+                                      }
+                                    ]
+                                  },
+                                  "runAfter": {},
+                                  "description": "This create HTML table format for the site breach information"
+                                },
+                                "Set_variable_terminate_in_case_if_sites_are_not_breached": {
+                                  "type": "SetVariable",
+                                  "inputs": {
+                                    "name": "Terminate",
+                                    "value": "Success"
+                                  },
+                                  "runAfter": {
+                                    "Append_to_string_variable_breaches_with_all_the_breach_information": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "description": "This sets the terminate variable to success if sites are not breached"
+                                }
+                              },
+                              "runAfter": {},
+                              "else": {
+                                "actions": {
+                                  "Append_to_string_variable_Breaches_if_no_info_found": {
+                                    "type": "AppendToStringVariable",
+                                    "inputs": {
+                                      "name": "Breaches",
+                                      "value": "There are no breaches found for this site: @{items('For_each_URL')?['Url']}"
+                                    },
+                                    "runAfter": {
+                                      "Set_variable_terminate_if_API_returns_null_response": [
+                                        "Succeeded"
+                                      ]
+                                    },
+                                    "description": "This appends string value to breaches variable if no info found"
+                                  },
+                                  "Set_variable_terminate_if_API_returns_null_response": {
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                      "name": "Terminate",
+                                      "value": "Success"
+                                    },
+                                    "runAfter": {}
+                                  }
+                                }
+                              },
+                              "description": "This checks the condition on the API response"
+                            }
+                          }
+                        }
+                      },
+                      "default": {
+                        "actions": {
+                          "Append_to_string_variable__in_case_of_improper_API_response": {
+                            "type": "AppendToStringVariable",
+                            "inputs": {
+                              "name": "Breaches",
+                              "value": "Improper response from API . \nstatus Code :  @{outputs('Get_breached_site_information')['statusCode']}"
+                            },
+                            "runAfter": {},
+                            "description": "This appends status code of API in case of improper response"
+                          },
+                          "Set_variable_terminate_in_case_of_API_error": {
+                            "type": "SetVariable",
+                            "inputs": {
+                              "name": "Terminate",
+                              "value": "APIFailed"
+                            },
+                            "runAfter": {
+                              "Append_to_string_variable__in_case_of_improper_API_response": [
+                                "Succeeded"
+                              ]
+                            },
+                            "description": "This sets the terminate variable in case of API error"
+                          }
+                        }
+                      },
+                      "runAfter": {
+                        "Get_breached_site_information": [
+                          "Succeeded"
+                        ]
+                      },
+                      "description": "This checks on the API response returned"
+                    }
+                  },
+                  "runAfter": {},
+                  "description": "This iterates on each URL to perform set of actions",
+                  "runtimeConfiguration": {
+                    "concurrency": {
+                      "repetitions": 1
+                    }
+                  }
+                }
               },
               "runAfter": {
-                "Compose_image_to_update_in_the_incident": [
+                "Initialize_variable_Terminate": [
                   "Succeeded"
                 ]
               },
-              "description": "This adds comment to the Incident"
-            },
-            "Compose_image_to_update_in_the_incident": {
-              "type": "Compose",
-              "inputs": "<img src=\"https://www.bing.com/th?id=OIP.bhGpY9L2aqT2B00nX_gOoAEiEi&w=93&h=100&c=8&rs=1&qlt=90&dpr=1.5&pid=3.1&rm=2\" alt=\"Lamp\" width=\"32\" height=\"32\">",
-              "runAfter": {
-                "For_each_URL": [
-                  "Succeeded"
-                ]
+              "else": {
+                "actions": {
+                  "Terminate_if_there_are_no_inputs_from_sentinel": {
+                    "type": "Terminate",
+                    "inputs": {
+                      "runStatus": "Failed",
+                      "runError": {
+                        "message": "No Inputs from sentinel"
+                      }
+                    },
+                    "runAfter": {}
+                  }
+                }
               },
-              "description": "This composes HaveIBeenPwned image to be added to the Incident"
+              "description": "This checks if sentinel is providing URL as the entities"
             },
             "Entities_-_Get_URLs": {
               "type": "ApiConnection",
@@ -72,137 +334,23 @@
                 "path": "/entities/url"
               },
               "runAfter": {}
-
             },
-            "For_each_URL": {
-              "type": "Foreach",
-              "foreach": "@body('Entities_-_Get_URLs')?['URLs']",
-              "actions": {
-                "Get_breached_site_information": {
-                  "type": "ApiConnection",
-                  "inputs": {
-                    "host": {
-                      "connection": {
-                        "name": "@parameters('$connections')['HaveIBeenPwnedConnector']['connectionId']"
-                      }
-                    },
-                    "method": "get",
-                    "path": "/api/v3/breaches",
-                    "queries": {
-                      "domain": "@items('For_each_URL')?['Url']"
-                    }
-                  },
-                  "runAfter": {},
-                  "description": "Get breached information for particular site from Have i been pwned"
-                },
-                "Switch_to_check_the_status_of_API_response_from_HaveIBeenPwned": {
-                  "type": "Switch",
-                  "expression": "@outputs('Get_breached_site_information')['statusCode']",
-                  "cases": {
-                    "Case-No_data_found": {
-                      "case": 404,
-                      "actions": {
-                        "Append_to_string_variable_breaches_if_no_breach_information_found": {
-                          "type": "AppendToStringVariable",
-                          "inputs": {
-                            "name": "Breaches",
-                            "value": "There are no breaches found for the site : @{items('For_each_URL')?['Url']}"
-                          },
-                          "runAfter": {},
-                          "description": "This appends no data if no information for sites are found"
-                        }
-                      }
-                    },
-                    "Case-Success": {
-                      "case": 200,
-                      "actions": {
-                        "Append_to_string_variable_breaches_with_all_the_breach_information": {
-                          "type": "AppendToStringVariable",
-                          "inputs": {
-                            "name": "Breaches",
-                            "value": "For the site : @{items('For_each_URL')?['Url']}\n@{body('Create_HTML_table_for_site_breach_information')}"
-                          },
-                          "runAfter": {
-                            "Create_HTML_table_for_site_breach_information": [
-                              "Succeeded"
-                            ]
-                          },
-                          "description": "This appends breach information to the variable breaches"
-                        },
-                        "Create_HTML_table_for_site_breach_information": {
-                          "type": "Table",
-                          "inputs": {
-                            "from": "@body('Get_breached_site_information')",
-                            "format": "HTML",
-                            "columns": [
-                              {
-                                "header": "Name",
-                                "value": "@item()?['Name']"
-                              },
-                              {
-                                "header": "Title",
-                                "value": "@item()?['Title']"
-                              },
-                              {
-                                "header": "Domain",
-                                "value": "@item()?['Domain']"
-                              },
-                              {
-                                "header": "BreachDate",
-                                "value": "@item()?['BreachDate']"
-                              },
-                              {
-                                "header": "AddedDate",
-                                "value": "@item()?['AddedDate']"
-                              },
-                              {
-                                "header": "ModifiedDate",
-                                "value": "@item()?['ModifiedDate']"
-                              },
-                              {
-                                "header": "PwnCount",
-                                "value": "@item()?['PwnCount']"
-                              }
-                            ]
-                          },
-                          "runAfter": {},
-                          "description": "This create HTML table format for the site breach information"
-                        }
-                      }
-                    }
-                  },
-                  "default": {
-                    "actions": {
-                      "Append_to_string_variable__in_case_of_improper_API_response": {
-                        "type": "AppendToStringVariable",
-                        "inputs": {
-                          "name": "Breaches",
-                          "value": "Improper response from API . \nstatus Code :  @{outputs('Get_breached_site_information')['statusCode']}"
-                        },
-                        "runAfter": {},
-                        "description": "This appends status code of API in case of improper response"
-                      }
-                    }
-                  },
-                  "runAfter": {
-                    "Get_breached_site_information": [
-                      "Succeeded"
-                    ]
-                  },
-                  "description": "This checks on the API response returned"
-                }
+            "Initialize_variable_Terminate": {
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "Terminate",
+                    "type": "string"
+                  }
+                ]
               },
               "runAfter": {
                 "Initialize_variable_breach_information": [
                   "Succeeded"
                 ]
               },
-              "description": "This iterates on each URL to perform set of actions",
-              "runtimeConfiguration": {
-                "concurrency": {
-                  "repetitions": 20
-                }
-              }
+              "description": "This holds the variable terminate to terminate the logic app"
             },
             "Initialize_variable_breach_information": {
               "type": "InitializeVariable",
@@ -246,7 +394,6 @@
           },
           "contentVersion": "1.0.0.0",
           "outputs": {}
-
         },
         "parameters": {
           "$connections": {
@@ -266,7 +413,7 @@
           }
         }
       },
-      "name": "[parameters('Playbook_Name')]",
+      "name": "[parameters('Playbook Name')]",
       "type": "Microsoft.Logic/workflows",
       "location": "[resourceGroup().location]",
 

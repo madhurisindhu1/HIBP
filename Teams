@@ -1,17 +1,40 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
-  "metadata": {
-    "comments": "HaveIBeenPwned_ResponseonTeams playbook checks if a data has breached from user accounts and updates in the Incident as well as provide an option to SOC to close incident and send email to account user",
-    "author": "Sindhu Talluri, HaveIBeenPwned"
-  },
+    "metadata": {    
+    "title": "Response on Teams - HaveIBeenPwned",
+    "description": "This playbook checks if user accounts are breached, sends email to breached user account and closes incident based on action taken by SOC.",
+    "mainSteps": [ "1. Fetch the breach information from HaveIBeenPwned", "2. Sends adaptive card to SOC with breach information from HaveIBeenPwned" ],
+    "prerequisites": [
+      "1. HaveIBeenPwned Custom Connector needs to be deployed prior to the deployment of this playbook under the same resource group.",
+      "2. Generate an API key. Refer this link [ how to generate the API Key](https://haveibeenpwned.com/API/Key)"
+    ],
+    "prerequisitesDeployTemplateFile": "../../HaveIBeenPwnedCustomConnector/azuredeploy.json",
+    "lastUpdateTime": "2021-07-23T00:00:00.000Z",
+    "entities": [ "Accounts" ],
+    "tags": [ "ResponseonTeams" ],
+    "support": {
+      "tier": "community"
+    },
+    "author": {
+      "name": "Accenture"
+    }
+    },
   "parameters": {
     "Playbook Name": {
       "type": "string",
       "minLength": 1,
       "defaultValue": "HaveIBeenPwned_ResponseOnTeams",
       "metadata": {
-        "description": "Enter the playbook name"
+        "description": "Enter the playbook name without spaces"
+      }
+    },
+    "HaveIBeenPwned ConnectorName": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "HaveIBeenPwnedConnector",
+      "metadata": {
+        "description": "Enter the name for your HaveIBeenPwned Connector without spaces"
       }
     }
   },
@@ -355,7 +378,7 @@
                     "Compose_image_to_add_in_the_Incident": {
                       "runAfter": {},
                       "type": "Compose",
-                      "inputs": "<img src=\"https://www.bing.com/th?id=OIP.bhGpY9L2aqT2B00nX_gOoAEiEi&w=93&h=100&c=8&rs=1&qlt=90&dpr=1.5&pid=3.1&rm=2\" alt=\"Lamp\" width=\"32\" height=\"32\">",
+                      "inputs": "<img src=\"https://th.bing.com/th/id/OIP.bhGpY9L2aqT2B00nX_gOoAAAAA?w=152&h=180&c=7&o=5&dpr=1.5&pid=1.7\" alt=\"Lamp\" width=\"32\" height=\"32\">",
                       "description": "This composes the HaveIBeenPwned logo to attach in the incident"
                     }
                   },
@@ -1002,12 +1025,17 @@
               "azuresentinel": {
                 "connectionId": "[resourceId('Microsoft.Web/connections', variables('azuresentinel_Connection_Name'))]",
                 "connectionName": "[variables('azuresentinel_Connection_Name')]",
-                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]",
+                "connectionProperties": {
+                  "authentication": {
+                    "type": "ManagedServiceIdentity"
+                  }
+                }
               },
               "HaveIBeenPwnedConnector": {
                 "connectionId": "[resourceId('Microsoft.Web/connections', variables('HaveIBeenPwnedConnector_Connection_Name'))]",
                 "connectionName": "[variables('HaveIBeenPwnedConnector_Connection_Name')]",
-                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/HaveIBeenPwnedConnector')]"
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwned ConnectorName'))]"
               },
               "office365": {
                 "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/office365')]",
@@ -1027,7 +1055,9 @@
       "name": "[parameters('Playbook Name')]",
       "type": "Microsoft.Logic/workflows",
       "location": "[resourceGroup().location]",
-
+      "identity": {
+        "type": "SystemAssigned"
+      },
       "apiVersion": "2016-06-01",
       "dependsOn": [
 
@@ -1056,7 +1086,7 @@
       "location": "[resourceGroup().location]",
       "properties": {
         "api": {
-          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/HaveIBeenPwnedConnector')]"
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwned ConnectorName'))]"
         }
 
 
@@ -1080,7 +1110,11 @@
       "apiVersion": "2016-06-01",
       "name": "[variables('azuresentinel_Connection_Name')]",
       "location": "[resourceGroup().location]",
+      "kind": "V1",
       "properties": {
+        "displayName": "[variables('azuresentinel_Connection_Name')]",
+        "customParameterValues": {},
+        "parameterValueType": "Alternative",
         "api": {
           "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
         }

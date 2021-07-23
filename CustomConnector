@@ -1,21 +1,33 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
-  "metadata": {
-    "comments": "HaveIBeenPwned connector uses HaveIBeenPwned API to perform different actions on the user accounts.",
-    "author": "Sindhu Talluri, HaveIBeenPwned"
+  "metadata": {    
+    "title": "Logic Apps Custom Connector - HaveIBeenPwned",
+    "description": "HaveIBeenPwned connector uses HaveIBeenPwned API to perform different actions on the user accounts and sites.",  
+    "prerequisites": [
+      "1. HaveIBeenPwned service end point should be known. (e.g. https://{haveibeenpwned.com })"
+    ],
+    "lastUpdateTime": "2021-07-23T00:00:00.000Z",
+    "support": {
+      "tier": "community"
+    },
+    "author": {
+      "name": "Accenture"
+    }
   },
   "parameters": {
     "HaveIBeenPwned ConnectorName": {
-      "defaultValue": "HaveIBeenPwnedConnector",
+      "defaultValue": "HaveIBeenPwnedConnector",      
+      "minLength": 1,
       "type": "String",
       "metadata": {
-        "description": "Name of the HaveIBeenPwned Connector"
+        "description": "Enter name of the HaveIBeenPwned Connector without spaces"
       }
     },
     "Service EndPoint": {
       "defaultValue": "https://haveibeenpwned.com",
       "type": "String",
+      "minLength": 1,
       "metadata": {
         "description": "Enter the HaveIBeenPwned Service EndPoint "
       }
@@ -25,7 +37,7 @@
     {
       "type": "Microsoft.Web/customApis",
       "apiVersion": "2016-06-01",
-      "name": "HaveIBeenPwnedConnector",
+      "name": "[parameters('HaveIBeenPwned ConnectorName')]",
       "location": "[resourceGroup().location]",
       "properties": {
         "connectionParameters": {

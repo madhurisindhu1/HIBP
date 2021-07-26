@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "metadata": {
     "title": "Get Account Breaches - HaveIBeenPwned",
-    "description": "This playbook checks if user accounts are breached and updates in the Incident.",
+    "description": "This playbook updates the Incident if the user accounts are breached.",
     "mainSteps": [ "1. Fetch the breach information from HaveIBeenPwned", "2. Enrich the incident with breach information from HaveIBeenPwned" ],
     "prerequisites": [
       "1. HaveIBeenPwned Custom Connector needs to be deployed prior to the deployment of this playbook under the same resource group.",
@@ -21,7 +21,7 @@
     }
   },
   "parameters": {
-    "Playbook Name": {
+    "PlaybookName": {
       "type": "string",
       "minLength": 1,
       "defaultValue": "HaveIBeenPwned_Enrichment_GetAccountBreaches",
@@ -29,7 +29,7 @@
         "description": "Enter the playbook name without spaces"
       }
     },
-    "HaveIBeenPwned ConnectorName": {
+    "HaveIBeenPwnedConnectorName": {
       "type": "string",
       "minLength": 1,
       "defaultValue": "HaveIBeenPwnedConnector",
@@ -39,14 +39,14 @@
     }
   },
   "variables": {
-    "azuresentinel_Connection_Name": "[concat('azuresentinel-', parameters('Playbook Name'))]",
-    "HaveIBeenPwnedConnector_Connection_Name": "[concat('HaveIBeenPwnedConnector-',  parameters('Playbook Name'))]"
+    "azuresentinel_Connection_Name": "[concat('azuresentinel-', parameters('PlaybookName'))]",
+    "HaveIBeenPwnedConnector_Connection_Name": "[concat('HaveIBeenPwnedConnector-',  parameters('PlaybookName'))]"
   },
   "resources": [
     {
       "type": "Microsoft.Logic/workflows",
       "apiVersion": "2017-07-01",
-      "name": "[parameters('Playbook Name')]",
+      "name": "[parameters('PlaybookName')]",
       "location": "[resourceGroup().location]",
       "identity": {
         "type": "SystemAssigned"
@@ -482,7 +482,7 @@
               "HaveIBeenPwnedConnector": {
                 "connectionId": "[resourceId('Microsoft.Web/connections', variables('HaveIBeenPwnedConnector_Connection_Name'))]",
                 "connectionName": "[variables('HaveIBeenPwnedConnector_Connection_Name')]",
-                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwned ConnectorName'))]"
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwnedConnectorName'))]"
               },
               "azuresentinel": {
                 "connectionId": "[resourceId('Microsoft.Web/connections', variables('azuresentinel_Connection_Name'))]",
@@ -522,7 +522,7 @@
       "location": "[resourceGroup().location]",
       "properties": {
         "api": {
-          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwned ConnectorName'))]"
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwnedConnectorName'))]"
         }
 
 

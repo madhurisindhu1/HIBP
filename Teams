@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
-    "metadata": {    
+  "metadata": {
     "title": "Response on Teams - HaveIBeenPwned",
     "description": "This playbook checks if user accounts are breached, sends email to breached user account and closes incident based on action taken by SOC.",
     "mainSteps": [ "1. Fetch the breach information from HaveIBeenPwned", "2. Sends adaptive card to SOC with breach information from HaveIBeenPwned" ],
@@ -19,9 +19,9 @@
     "author": {
       "name": "Accenture"
     }
-    },
+  },
   "parameters": {
-    "Playbook Name": {
+    "PlaybookName": {
       "type": "string",
       "minLength": 1,
       "defaultValue": "HaveIBeenPwned_ResponseOnTeams",
@@ -29,7 +29,7 @@
         "description": "Enter the playbook name without spaces"
       }
     },
-    "HaveIBeenPwned ConnectorName": {
+    "HaveIBeenPwnedConnectorName": {
       "type": "string",
       "minLength": 1,
       "defaultValue": "HaveIBeenPwnedConnector",
@@ -39,10 +39,10 @@
     }
   },
   "variables": {
-    "TeamsConnectionName": "[concat('teamsconnector-', parameters('Playbook Name'))]",
-    "azuresentinel_Connection_Name": "[concat('azuresentinel-', parameters('Playbook Name'))]",
-    "HaveIBeenPwnedConnector_Connection_Name": "[concat('HaveIBeenPwnedConnector-',  parameters('Playbook Name'))]",
-    "office365_Connection_Name": "[concat('office365-',  parameters('Playbook Name'))]"
+    "TeamsConnectionName": "[concat('teamsconnector-', parameters('PlaybookName'))]",
+    "azuresentinel_Connection_Name": "[concat('azuresentinel-', parameters('PlaybookName'))]",
+    "HaveIBeenPwnedConnector_Connection_Name": "[concat('HaveIBeenPwnedConnector-',  parameters('PlaybookName'))]",
+    "office365_Connection_Name": "[concat('office365-',  parameters('PlaybookName'))]"
   },
   "resources": [
     {
@@ -1035,7 +1035,7 @@
               "HaveIBeenPwnedConnector": {
                 "connectionId": "[resourceId('Microsoft.Web/connections', variables('HaveIBeenPwnedConnector_Connection_Name'))]",
                 "connectionName": "[variables('HaveIBeenPwnedConnector_Connection_Name')]",
-                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwned ConnectorName'))]"
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwnedConnectorName'))]"
               },
               "office365": {
                 "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/office365')]",
@@ -1052,7 +1052,7 @@
         }
 
       },
-      "name": "[parameters('Playbook Name')]",
+      "name": "[parameters('PlaybookName')]",
       "type": "Microsoft.Logic/workflows",
       "location": "[resourceGroup().location]",
       "identity": {
@@ -1086,7 +1086,7 @@
       "location": "[resourceGroup().location]",
       "properties": {
         "api": {
-          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwned ConnectorName'))]"
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/customApis/',parameters('HaveIBeenPwnedConnectorName'))]"
         }
 
 
